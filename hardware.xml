@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<hardware>
+    <sleeposc enable="true" ppm="30" />
+    <script enable="true" />
+	<txpower power="7" bias="5" />
+	<slow_clock enable="true" />
+    <pmux regulator_pin="7" />
+    <port index="0" tristatemask="0" pull="down"/>
+</hardware>

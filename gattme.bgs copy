@@ -1,0 +1,331 @@
+##################################
+# IR Sensor Register and Addresses
+##################################
+const IR_ADDRESS = $5a
+
+#register addresses
+const PART_ID = $00
+const REV_ID = $01
+const SEQ_ID = $02
+const INT_CFG = $03
+const IRQ_ENABLE = $04
+const IRQ_MODE1 = $05
+const IEQ_MODE2 = $06
+const HW_KEY = $07
+const MEAS_RATE = $08
+const ALS_RATE = $09
+const PS_RATE = $0a
+const ALS_LOW_TH0 = $0b
+const ALS_LOW_TH1 = $0c
+const ALS_HI_TH0 = $0d
+const ALS_HI_TH1 = $0e
+const PS_LED21 = $0f
+const PS_LED3 = $10
+const PS1_TH0 = $11
+const PS1_TH1 = $12
+const PS2_TH0 = $13
+const PS2_TH1 = $14
+const PS3_TH0 = $15
+const PS3_TH1 = $16
+const PARAM_WR = $17
+const COMMAND = $18
+const RESPONSE = $20
+const IRQ_STATUS = $21
+const ALS_VIS_DATA0 = $22
+const ALS_VIS_DATA1 = $23
+const ALS_IR_DATA0 = $24
+const ALS_IR_DATA1 = $25
+const PS1_DATA0 = $26
+const PS1_DATA1 = $27
+const PS2_DATA0 = $28
+const PS2_DATA1 = $29
+const PS3_DATA0 = $2a
+const PS3_DATA1 = $2b
+const AUX_DATA0 = $2c
+const AUX_DATA1 = $2d
+const PARAM_RD = $2e
+const CHIP_STAT = $30
+const ANA_IN_KEY = $3b
+
+# ram addresses
+const I2C_ADDR = $00
+const CHLIST  = $01
+const PSLED12_SELECT = $02
+const PSLED3_SELECT = $03
+const PS_ENCODING = $05
+const ALS_ENCODING = $06
+const PS1_ADCMUX = $07
+const PS2_ADCMUX = $08
+const PS3_ADCMUX = $09
+const PS_ADC_COUNTER = $0a
+const PS_ADC_GAIN = $0b
+const PS_ADC_MISC = $0c
+const ALS_IR_ADCMUX = $0e
+const AUX_ADCMUX = $0f
+const ALS_VIS_ADC_COUNTER = $10
+const ALS_VIS_ADC_GAIN = $11
+const ALS_VIS_ADC_MISC = $12
+const ALS_HYST = $16
+const PS_HYST = $17
+const PS_HISTORY = $18
+const ALS_HISTORY = $19
+const ADC_OFFSET  = $1a
+const LED_REC = $1c
+const ALS_IR_ADC_COUNTER = $1d
+const ALS_IR_ADC_GAIN = $1e
+const ALS_IR_ADC_MISC = $1f
+
+##################################
+# General Variables
+##################################
+dim hid_attribute					# controls which GATT attribute is used for writing Hardware Interface Device data (normal or boot mode)
+dim sensorComm(24)					# Buffer for sensor and button communication.
+
+##################################
+# IR Sensor Variables
+##################################
+const ir_number_of_sensors = 2		# Number of IR Sensors
+const ir_bytes = 2					# Bytes that each IR readings take
+dim write_reg_buffer(2)
+dim i2c_result						# Result from I2C operation
+dim data_len 						# Returned length from I2C read
+dim ir_current_sensor				# Sensor currently active from which we get readings
+dim ir_begin_byte					# Beginning byte for sensorComm buffer where the current sensor's value is being stored
+dim ir_end_byte						# Ending byte for sensorComm buffer where the current sensor's value is being stored
+
+##################################
+# FSR Variables
+##################################
+#const fsr_number_of_sensors = 0		# Number of Force Sensitive Resistors
+#const fsr_bytes = 2					# Bytes that each FSR readings take
+#dim fsr_offset 						# Offset of bytes in response
+#dim fsr_index						# Current FSR being read						
+#dim fsr_result
+#dim fsr_begin_byte
+#dim fsr_end_byte
+#dim fsr_check
+
+##################################
+# Mouse Coordinate Variables
+##################################
+dim tmp(3)          				# buffer for `building attribute value (3-byte mouse HID report)
+
+
+##################################
+# Microphone Variables
+##################################
+
+
+##################################
+# Toggle Button Variables
+##################################
+
+
+##################################
+# I2C Auxiliary Functions
+##################################
+
+# Write to I2C register
+procedure write_reg(regVal, dataVal)
+	write_reg_buffer(0:1) = regVal
+	write_reg_buffer(1:1) = dataVal
+	call hardware_i2c_write(IR_ADDRESS << 1, 1,2, write_reg_buffer(0:2))
+end
+
+# Read from I2C register (Only PS1_DATA and PS0_Data)
+procedure read_reg(regAddr)
+	call hardware_i2c_write(IR_ADDRESS << 1, 0, 1, regAddr)
+
+	ir_begin_byte = ir_current_sensor*ir_bytes
+	ir_end_byte = ir_begin_byte + 1
+
+	if regAddr = PS1_DATA0 then
+		call hardware_i2c_read(IR_ADDRESS << 1, 1, 1)(i2c_result, data_len, sensorComm(ir_end_byte:1))
+	else
+		call hardware_i2c_read(IR_ADDRESS << 1, 1, 1)(i2c_result, data_len, sensorComm(ir_begin_byte:1))
+	end if
+end
+
+# Set SI1141 parameters
+procedure param_set(byteAddress, byteVal)
+	call write_reg(PARAM_WR, byteVal)
+	call write_reg(COMMAND, $a0 | byteAddress)
+end
+
+####################################################################
+# Function to initialize all sensors. No need to block them since 
+# it is a write only operation.
+####################################################################
+procedure initializeSI1141()
+	call write_reg(HW_KEY, $17)		# Initialization Mode
+	call write_reg(PS_LED21, $01)	# Give the LED 1 max power (3.6V) for performance
+	call param_set(CHLIST, $01)		# Set CHLIST
+end
+
+##################################
+# Function that reads all data 
+# from IR and FSRs every time it
+# is called
+##################################
+procedure getReadings()
+	#######################
+	# Read IR sensors Data
+	#######################
+	ir_current_sensor = 0
+	while ir_current_sensor < ir_number_of_sensors
+		
+		# Enable current IR sensor
+		call hardware_io_port_write(1, $01 << ir_current_sensor, $01 << ir_current_sensor)
+
+		# Read IR Data and put it in ir_sensorComm buffer
+		call read_reg(PS1_DATA0)
+		call read_reg(PS1_DATA1)
+
+		# Disable current IR sensor
+		call hardware_io_port_write(1, $01 << ir_current_sensor, 0)
+
+		ir_current_sensor = ir_current_sensor + 1
+		
+	end while
+
+	# Update GATT IR
+	#call attributes_write(hid_attribute, 0, ir_number_of_sensors*ir_bytes, sensorComm(0:ir_number_of_sensors*ir_bytes))
+	
+
+	#######################
+	# Read FSRs Data
+	#######################
+	#fsr_index = 0
+	#while fsr_index < fsr_number_of_sensors
+	#	call hardware_adc_read(fsr_index,3,0)
+	#	fsr_index = fsr_index + 1
+	#end while
+
+	
+	# Update GATT FSR
+	#call attributes_write(hid_attribute, 0, fsr_offset + fsr_number_of_sensors*fsr_bytes, sensorComm(0:fsr_offset + fsr_number_of_sensors*fsr_bytes))	
+
+end
+
+
+
+###############################################################
+#############  Mouse Coordinate Generating Methods ############
+###############################################################
+
+const minDepth = 300
+const maxDepth = 4000
+
+dim leftRightRatio = 1 # Ratio of left depth to right depth
+dim avgDepth = 300 # Initialize average depth
+
+dim xCoord = 0 # build out coordinates on 100 by 100 grid (0 to 99)
+dim yCoord = 0 # build out coordinates on 100 by 100 grid (0 to 99)
+dim XYCoord(3)
+
+procedure filterReadings()
+	leftRightRatio = sensorComm(0:1)/sensorComm(1:2)
+	avgDepth = (sensorComm(0:1)+sensorComm(1:2))/2
+	#sensorComm(0:1) # present left prox sensor value
+	#sensorComm(1:2) # present right prox sensor value
+end
+
+procedure discernCoordinates()
+	XYCoord(0) = (1 - leftRightRatio)*100
+	XYCoord(1) = ((maxDepth - avgDepth)/(maxDepth - minDepth))*100
+end
+
+procedure writeCoordinatesToGATT()
+	call attributes_write(hid_attribute, 0, 3, XYCoord) #ir_number_of_sensors*ir_bytes, ) #sensorComm(0:ir_number_of_sensors*ir_bytes))
+end
+
+
+# System boot event listener
+event system_boot(major, minor, patch, build, ll_version, protocol, hw)
+
+	
+	#call hardware_io_port_config_direction(0,$ff)
+	call hardware_io_port_config_direction(1, $ff)
+	call hardware_io_port_write(1, $ff, $01 << 7)
+	
+	fsr_offset = ir_number_of_sensors*ir_bytes
+	#fsr_offset = 2
+	## Begin by starting I2C device ##
+	call initializeSI1141()
+	
+	## Set hardware timer to take periodic sensor readings
+	call hardware_set_soft_timer(3000,0,0)
+	
+	## Initialize bluetooth communication ##
+	
+	# Set advertisement interval to 20ms per min, 30 ms max (units are 0.625ms)
+	# Use all three advertisement channels (7 = bitmask 0b000001111)
+	call gap_set_adv_parameters(32, 48, 7)
+	
+	# Start advertising (discoverable/connectable)
+	call gap_set_mode(gap_general_discoverable, gap_undirected_connectable)
+	
+	# Security
+	call sm_set_bondable_mode(1)
+	call sm_encrypt_start(0,1)
+
+	# Assign gatt HID port to our attribute write var
+	# use default report for mouse
+    hid_attribute = hid_mouse
+	
+end
+
+# Device Reading function
+event hardware_soft_timer(handle)
+	call write_reg(COMMAND, $05) 	# General command for I2C readings (leave outside)
+	call getReadings() # records to first two bytes of sensorComm
+
+end
+
+# Individual FSR reading
+event hardware_adc_result(input, value)
+	fsr_check = value >> 15
+	fsr_check = fsr_check & 1
+	fsr_begin_byte = fsr_offset + (input*fsr_bytes)
+	fsr_end_byte = fsr_begin_byte + fsr_bytes
+	if fsr_check = 0
+		sensorComm(fsr_begin_byte:2) = (value >> 4)
+	end if
+end
+
+
+# Connection event listener
+#event connection_status(connection, flags, address, address_type, conn_interval, timeout, latency, bonding)
+#	call gap_set_mode(gap_non_discoverable, gap_non_connectable )
+#end
+
+event connection_status(connection, flags, address, address_type, conn_interval, timeout, latency, bonding)
+    if flags &  connection_completed then
+        # start 20ms repeating timer (655 / 32768 Hz ~= 0.020 sec)
+        call hardware_set_soft_timer(655, 0, 0)
+    
+        # always initialize protocol mode to default 1 after connection
+        call attributes_write(hid_protocol_mode, 0, 1, 1)
+        hid_attribute = hid_mouse
+    end if
+end
+
+event attributes_value(connection, reason, handle, offset, value_len, value_data)
+    if value_data(0:1) = 1 then
+        # switched to normal report mode
+        hid_attribute = hid_mouse
+    end if
+    if value_data(0:1) = 2 then
+        # switched to boot report mode
+        hid_attribute = hid_boot_mouse
+    end if
+end
+
+
+# Disconnection event listener
+event connection_disconnected(connection, result)
+	call gap_set_mode(gap_general_discoverable, gap_undirected_connectable)
+end
+
+
+

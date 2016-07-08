@@ -1,0 +1,5 @@
+xgatt_battery 15
+hid_mouse 18
+hid_control 26
+hid_boot_mouse 28
+hid_protocol_mode 31

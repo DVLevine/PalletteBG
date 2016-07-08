@@ -1,0 +1,134 @@
+###############################################################
+####  I2C Methods for Low Level Proximity Sensor Operation ####
+###############################################################
+
+# Shared Variables:
+
+# Write to I2C register
+procedure write_reg(regVal, dataVal)
+end
+
+# Read from I2C register (Only PS1_DATA and PS0_Data)
+procedure read_reg(regAddr)
+end
+
+# Set SI1141 parameters according to guide
+procedure param_set(byteAddress, byteVal)
+end
+
+# Initialize all sensors. No need to block them since it is a write only operation.
+procedure initializeSI1141()
+end
+
+
+###############################################################
+##############  Primary BLE113 System Event Calls #############
+###############################################################
+
+# Shared variables: 
+
+# Main Setup Call. Method Main. 
+# 1) Turn on all tristate buffers so all sensors are listening
+# 2) Begin sensor timer to make periodic sensor readings (periodic action timer)
+# 3) Initialize Bluetooth Advertising and Security Procedures
+# 4) Set hid attributes
+event system_boot
+end
+
+# Event Periodic Procedure. Used for reading and action at time steps.
+event hardware_soft_timer(handle)
+end
+
+# Used for reading analog ports and converting the value to digital. 
+# Used for FSRs and Microphone raw input
+event adc_result(input, value) 
+end
+
+# Upon connection do blah
+event connection_status
+end
+
+# Upon connection disconnect to blah
+event connection_disconnected(connection, result)
+end
+
+###############################################################
+#############  Mouse Coordinate Generating Methods ############
+###############################################################
+
+# Shared Variables:
+	dim tmp(3)   # buffer for building attribute value (3-byte mouse HID report)
+	
+
+# Steps: 
+# 1) Read Sensors
+# 2) Filter Incoming Readings. Use Max and Min height. If no Calibrated Min Height, use a default value
+# 3) Using Linear Interp, discern x,y coordinate position 
+# 4) Write coordinates to GATT
+
+# Gets Readings from Proximity Sensors
+procedure getReadings()
+end
+
+procedure filterReadings()
+end
+
+procedure discernCoordinates()
+end
+
+procedure writeCoordinatesToGATT()
+end
+
+
+###############################################################
+###################  Microphone Input Methods #################
+###############################################################
+
+# Required Dims:
+	puff_freq_max
+	puff_freq_min
+	sip_freq_max
+	sip_freq_min
+	# Is there a way to save a calibrated "puff" or "sip" frequency?
+
+# Shared Variables: 
+	present_puff_duration # time for present duration mic "puff" is recorded.
+	present_sip_duration # time for present duraction "sip" is recorded
+	mic_history # Last 500 mic readings
+
+# 1) Read Mic
+# 2) Filter Incoming Mic Readings. 
+# 3) Discern Frequency. 
+# 4) Use Frequency and Threshold to determine if "Puff", "Sip" or not
+# 5) If puff duration > 0 (puff occured), act as "click on ". If sip duration > 1 (sip occured, act as "click off"). 
+# 6) If puff duration > 5 seconds, act as "calibrate and record calibrated min height for sensors"
+
+
+procedure readRawMic()
+end
+
+procedure filterMicReadings()
+end
+
+procedure discernMicFrequency()
+end
+
+procedure classifyMic()
+end
+
+procedure writeClickStatusToGATT()
+end
+
+
+###############################################################
+####################  Toggle Button Methods ###################
+###############################################################
+
+# Shared Variables
+
+# some method about button interrupts? Maybe adc check buttons
+
+# setup trigger in setup
+
+
+
