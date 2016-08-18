@@ -85,7 +85,7 @@ dim sensorCommPrev(24)				# Buffer for recorded last sensorVal
 ##################################
 # IR Sensor Variables
 ##################################
-const ir_number_of_sensors = 2		# Number of IR Sensors
+const ir_number_of_sensors = 3		# Number of IR Sensors
 const ir_bytes = 2					# Bytes that each IR readings take
 dim write_reg_buffer(2)
 dim i2c_result						# Result from I2C operation
@@ -93,18 +93,19 @@ dim data_len 						# Returned length from I2C read
 dim ir_current_sensor				# Sensor currently active from which we get readings
 dim ir_begin_byte					# Beginning byte for sensorComm buffer where the current sensor's value is being stored
 dim ir_end_byte						# Ending byte for sensorComm buffer where the current sensor's value is being stored
+dim ir_tri_state          #
 
 ##################################
 # FSR Variables
 ##################################
-#const fsr_number_of_sensors = 0		# Number of Force Sensitive Resistors
-#const fsr_bytes = 2					# Bytes that each FSR readings take
-#dim fsr_offset 						# Offset of bytes in response
-#dim fsr_index						# Current FSR being read						
-#dim fsr_result
-#dim fsr_begin_byte
-#dim fsr_end_byte
-#dim fsr_check
+const fsr_number_of_sensors = 1		# Number of Force Sensitive Resistors
+const fsr_bytes = 2					# Bytes that each FSR readings take
+dim fsr_offset 						# Offset of bytes in response
+dim fsr_index						# Current FSR being read
+dim fsr_result
+dim fsr_begin_byte
+dim fsr_end_byte
+dim fsr_check
 
 ##################################
 # Mouse Coordinate Variables
@@ -133,7 +134,7 @@ procedure write_reg(regVal, dataVal)
 	call hardware_i2c_write(IR_ADDRESS << 1, 1,2, write_reg_buffer(0:2))
 end
 
-# Read from I2C register (Only PS1_DATA and PS0_Data)
+# Read from I2C register (Only PS1_DATA and PS0_Data for IR sensors)
 procedure read_reg(regAddr)
 	call hardware_i2c_write(IR_ADDRESS << 1, 0, 1, regAddr)
 
@@ -154,7 +155,7 @@ procedure param_set(byteAddress, byteVal)
 end
 
 ####################################################################
-# Function to initialize all sensors. No need to block them since 
+# Function to initialize all sensors. No need to block them since
 # it is a write only operation.
 ####################################################################
 procedure initializeSI1141()
@@ -164,7 +165,7 @@ procedure initializeSI1141()
 end
 
 ##################################
-# Function that reads all data 
+# Function that reads all data
 # from IR and FSRs every time it
 # is called
 ##################################
@@ -173,47 +174,63 @@ procedure getReadings()
 	# Read IR sensors Data
 	#######################
 
-	#copy last sensorVal
-	
+	#copy last sensorVals
 	sensorCommPrev(0) = sensorComm(0)
 	sensorCommPrev(1) = sensorComm(1)
 	sensorCommPrev(2) = sensorComm(2)
 	sensorCommPrev(3) = sensorComm(3)
+  sensorCommPrev(4) = sensorComm(4)
+	sensorCommPrev(5) = sensorComm(5)
+
+  	# Select all pins on port 1 (IR tristate buffer enable lines) and
+  	# set them to enabled.
+  	# Port 1, Pin Selection Mask 1111 1111, Pin Logical Mask 0000 0000
+  	call hardware_io_port_write(1, $ff, 0)
+
+  	# Ask all sensors to update their sensor value and store them in their
+  	# respective memory.
+  	call write_reg(COMMAND, $05)
+
+  	ir_current_sensor = 0
+  	while ir_current_sensor < ir_number_of_sensors
+
+  		# Left shift 1 by number of current sensor. For 0 -> 001, 1 -> 010, 2-> 100
+  		ir_tri_state = $01 << ir_current_sensor
+
+  		# XOR tristate with 11111111 to invert: 001-> 110, 010 -> 101, 100 -> 011.
+  		# This is neccesary, because the tristate buffer activates for 0.
+  		ir_tri_state = ir_tri_state ^ $ff
+
+  		# Enable a single IR sensor via ir_tri_state,
+  		# And disable the rest.
+  		call hardware_io_port_write(1, $ff, ir_tri_state)
+
+  		# For Single IR Sensor, read IR Data and put it in ir_sensorComm buffer
+  		#call read_reg(PS1_DATA0)
+  		call read_reg(PS1_DATA1)
+
+  		ir_current_sensor = ir_current_sensor + 1
+
+  	end while
+
+    # Select all pins on port 1 (IR tristate buffer enable lines) and
+    # set them to disabled.
+    # Port 1, Pin Selection Mask 1111 1111, Pin Logical Mask 1111 1111
+  	call hardware_io_port_write(1, $ff, $ff)
 
 
-	ir_current_sensor = 0
-	while ir_current_sensor < ir_number_of_sensors
-		
-		# Enable current IR sensor
-		call hardware_io_port_write(1, $01 << ir_current_sensor, $01 << ir_current_sensor)
+    #MIC SECTION
+    fsr_index = 0
+  	while fsr_index < fsr_number_of_sensors
+  		call hardware_adc_read(fsr_index, 3, 0) # 12 BITS READ ADC
+  		fsr_index = fsr_index + 1
+  	end while
 
-		# Read IR Data and put it in ir_sensorComm buffer
-		#call read_reg(PS1_DATA0)
-		call read_reg(PS1_DATA1)
 
-		# Disable current IR sensor
-		call hardware_io_port_write(1, $01 << ir_current_sensor, 0)
 
-		ir_current_sensor = ir_current_sensor + 1
-		
-	end while
-
-	# Update GATT IR
-	#call attributes_write(hid_attribute, 0, ir_number_of_sensors*ir_bytes, sensorComm(0:ir_number_of_sensors*ir_bytes))
-	
-
-	#######################
-	# Read FSRs Data
-	#######################
-	#fsr_index = 0
-	#while fsr_index < fsr_number_of_sensors
-	#	call hardware_adc_read(fsr_index,3,0)
-	#	fsr_index = fsr_index + 1
-	#end while
-
-	
-	# Update GATT FSR
-	#call attributes_write(hid_attribute, 0, fsr_offset + fsr_number_of_sensors*fsr_bytes, sensorComm(0:fsr_offset + fsr_number_of_sensors*fsr_bytes))	
+    # For Debugging GATT IR
+    # Writes IR readings to GATT Database for communication over BLE
+    call attributes_write(hid_attribute, 0, ir_number_of_sensors*ir_bytes, sensorComm(0:ir_number_of_sensors*ir_bytes))
 
 end
 
@@ -227,6 +244,8 @@ const minDepth = 300
 const maxDepth = 4000
 
 dim leftRightRatio # =1 Ratio of left depth to right depth
+dim topDownRatio
+
 dim avgDepth # =300 Initialize average depth
 dim prevAVGDepth
 
@@ -234,67 +253,41 @@ dim xCoord # build out coordinates on 100 by 100 grid (0 to 99)
 dim yCoord # build out coordinates on 100 by 100 grid (0 to 99)
 dim XYCoord(3)
 
-dim LComm
-dim RComm
+dim LComm # Left Sensor
+dim RComm # Right Sensor
+dim TComm # Top Sensor
 
 dim LCommPrev
 dim RCommPrev
+dim TCommPrev
 
 dim dir
 dim prevDir
 
 # Keep former sensor values for relative position
-
 procedure filterReadings()
 
 	  leftRightRatio = 0
+    topDownRatio = 0
 
 	  LComm = sensorComm(0) >> 1
 	  RComm = sensorComm(2) >> 1
+    TComm = sensorComm(4) >> 1
 
 	  LCommPrev = sensorCommPrev(0) >> 1
 	  RCommPrev = sensorCommPrev(2) >> 1
-
-	 # if (sensorComm(0) <1)
-	 # LComm = LComm*-1
-	 # end if
-
-	  #if (sensorComm(1) <1)
-	  #RComm = RComm*-1
-	  #end if
-
-	  #if  (LComm < RComm)
-	   #   leftRightRatio = 200
-	  #end if
-
-  	  #if  (LComm > RComm)
-	   #   leftRightRatio = -200
-	  #end if
+    TCommPrev = sensorCommPrev(4) >> 1
 
 	  leftRightRatio = RComm - LComm
+    topDownRatio = -1*((TComm - 1.4*LComm)+(TComm-1.4*RComm))/2
 
-	  #LComm appears to work well. RComm not at all. for avg depth
+    if topDownRatio < 0 then
+    topDownRatio = topDownRatio*4
+    else
+    topDownRatio = topDownRatio*1.1
+    end if
 
 	avgDepth = ((1*(RComm)+1*LComm)/2)
-#	prevAVGDepth = (1*(RCommPrev)-1*LCommPrev)/2
-
-#	prevAVGDepth = avgDepth
-
-#	if (LComm < RComm)
-#	   avgDepth = RComm
-#	 else
-#	    avgDepth = RComm
-#	 end if
-
-#	 if (LCommPrev < RCommPrev)
-#	    prevAVGDepth = (RCommPrev)
-#	 else
-#	    prevAVGDepth = (RCommPrev)
-#	 end if
-
-	#avgDepth = (sensorComm(0)+sensorComm(2))/2
-	#prevAVGDepth = (sensorCommPrev(0)+sensorCommPrev(2))/2
-
 
 end
 
@@ -337,49 +330,9 @@ prevDir = dir
 
 	      end if
 
+XYCoord(2) = topDownRatio
+prevAVGDepth = avgDepth
 
-
-
-                #    if (avgDepth = prevAVGDepth) then
-#	      if (XYCoord(2) = 100) then
-#	      	 XYCoord(2) = -100
- #	      else
-#		XYCoord(2) = 100
-#		 dir = -1
-#	       end if
-#	  
-#	  end if
-
-      #	   if ((avgDepth - prevAVGDepth)<1000 && ((avgDepth - prevAVGDepth)>=0)) || ((avgDepth - prevAVGDepth)>1000 && ((avgDepth - prevAVGDepth)<=0)) then
-	#      if (dir=1)
-	  #    XYCoord(2)=-10
-	    #  dir = 1
-	     #  end if
-	    #  if (dir = -1)
-	    #   XYCoord(2)=10
-	    #   dir = -1
-	    #   end if
-	     
-	    #end if
-
-	    #if ((avgDepth - prevAVGDepth)<100 && ((avgDepth - prevAVGDepth)>0)) then
-	    #XYCoord(2) = -10
-	    #dir = 1
-	    #end if
-
-	    #if ((avgDepth - prevAVGDepth)>100 && ((avgDepth - prevAVGDepth)<0)) then
-	    #XYCoord(2) = 10
-	    #dir = -1
-	    #end if
-
-
-#	  XYCoord(2) =   2*(avgDepth-prevAVGDepth)#/4000#((avgDepth-prevAVGDepth)/4000)  
-
-	  prevAVGDepth = avgDepth
-
-
-	  #XYCoord(2) = leftRightRatio 
-	 #XYCoord(1) = avgDepth-prevAVGDepth   
 end
 
 procedure writeCoordinatesToGATT()
@@ -393,31 +346,31 @@ event system_boot(major, minor, patch, build, ll_version, protocol, hw)
       #initialize variables
       dir = 1
       prevDir = 0
-      XYCoord(2) = 100
-	
+      XYCoord(2) = 0#100
+
 	#call hardware_io_port_config_direction(0,$ff)
 	call hardware_io_port_config_direction(1, $ff)
 	call hardware_io_port_write(1, $ff, $01 << 7)
 
 
-	
+
 	#fsr_offset = ir_number_of_sensors*ir_bytes
 	#fsr_offset = 2
 	## Begin by starting I2C device ##
 	call initializeSI1141()
-	
+
 	## Set hardware timer to take periodic sensor readings
 	call hardware_set_soft_timer(3000,0,0)
-	
+
 	## Initialize bluetooth communication ##
-	
+
 	# Set advertisement interval to 20ms per min, 30 ms max (units are 0.625ms)
 	# Use all three advertisement channels (7 = bitmask 0b000001111)
 	call gap_set_adv_parameters(32, 48, 7)
-	
+
 	# Start advertising (discoverable/connectable)
 	call gap_set_mode(gap_general_discoverable, gap_undirected_connectable)
-	
+
 	# Security
 	call sm_set_bondable_mode(1)
 	call sm_encrypt_start(0,1)
@@ -425,14 +378,14 @@ event system_boot(major, minor, patch, build, ll_version, protocol, hw)
 	# Assign gatt HID port to our attribute write var
 	# use default report for mouse
     hid_attribute = hid_mouse
-	
+
 end
 
 # Device Reading function
 event hardware_soft_timer(handle)
 	call write_reg(COMMAND, $05) 	# General command for I2C readings (leave outside)
 	call getReadings() # records to first two bytes of sensorComm
-	
+
 	# Updated HID section
 	#####
 	call filterReadings()
@@ -442,8 +395,58 @@ event hardware_soft_timer(handle)
 	#####
 end
 
-# Individual FSR reading
+dim proper_value
+dim micCheck
+dim micVal
+
+dim r_value
+dim sequence(30)
+dim micCounter
+dim avgCounter
+dim micAvg
+dim micResult
+
+dim last
+dim rounds # bounce count for debouncing
+dim toggle # resultToggle for debouncing
+
+# Individual Mic reading
 event hardware_adc_result(input, value)
+  fsr_begin_byte = fsr_offset + (input*fsr_bytes)
+  fsr_end_byte = fsr_begin_byte + fsr_bytes
+
+  #LSB
+  sensorComm(fsr_begin_byte+1:1) = (value >> 4 & $00ff)
+  #MSB
+  sensorComm(fsr_begin_byte:1) = ((value >> 12) & $00ff)
+
+	proper_value = sensorComm(fsr_begin_byte:2)
+
+  if last = 0 then
+    last = proper_value
+  end if
+
+
+  micResult = 0
+  if (last-proper_value > 1000) then
+    micResult = 1
+    if (rounds=0) && (toggle = 0) then
+      micResult = 1
+      rounds = 1000
+      toggle = 1
+    end if
+  end if
+
+  if rounds > 0 then
+    rounds = rounds-1
+  end if
+
+  sensorComm(fsr_begin_byte:2) = 0
+  last = proper_value
+
+  XYCoord(0:1) = micResult
+
+
 	#fsr_check = value >> 15
 	#fsr_check = fsr_check & 1
 	#fsr_begin_byte = fsr_offset + (input*fsr_bytes)
@@ -462,8 +465,9 @@ end
 event connection_status(connection, flags, address, address_type, conn_interval, timeout, latency, bonding)
     if flags &  connection_completed then
         # start 20ms repeating timer (655 / 32768 Hz ~= 0.020 sec)
+        #call hardware_set_soft_timer(655, 0, 0)
         call hardware_set_soft_timer(655, 0, 0)
-    
+
         # always initialize protocol mode to default 1 after connection
         call attributes_write(hid_protocol_mode, 0, 1, 1)
         hid_attribute = hid_mouse
@@ -486,6 +490,3 @@ end
 event connection_disconnected(connection, result)
 	call gap_set_mode(gap_general_discoverable, gap_undirected_connectable)
 end
-
-
-
