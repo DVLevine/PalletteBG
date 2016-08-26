@@ -278,13 +278,13 @@ procedure filterReadings()
 	  RCommPrev = sensorCommPrev(2) >> 1
     TCommPrev = sensorCommPrev(4) >> 1
 
-	  leftRightRatio = RComm - LComm
+	  leftRightRatio = 3*(LComm - RComm)
     topDownRatio = -1*((TComm - 1.4*LComm)+(TComm-1.4*RComm))/2
 
     if topDownRatio < 0 then
-    topDownRatio = topDownRatio*4
-    else
     topDownRatio = topDownRatio*1.1
+    else
+    topDownRatio = topDownRatio*3
     end if
 
 	avgDepth = ((1*(RComm)+1*LComm)/2)
